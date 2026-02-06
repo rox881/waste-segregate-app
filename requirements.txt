@@ -2,7 +2,8 @@ fastapi
 uvicorn
 python-dotenv
 python-multipart
-pillow
-ultralytics
+# pillow # often installed by default or as dependency, but good to keep if using directly.
+# ultralytics removed to save memory on free tier
 google-generativeai
 pydantic
+pillow
