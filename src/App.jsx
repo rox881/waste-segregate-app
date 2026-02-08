@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Camera, ClipboardList, BarChart3, Globe2, Leaf } from 'lucide-react'
+import { Camera, ClipboardList, BarChart3, Globe2, Leaf, Smartphone } from 'lucide-react'
 import ScanScreen from './components/ScanScreen'
 import ItemDetailScreen from './components/ItemDetailScreen'
 import InsightsScreen from './components/InsightsScreen'
@@ -12,6 +12,15 @@ function App() {
   const [activeTab, setActiveTab] = useState('scan')
   const [selectedItem, setSelectedItem] = useState(null)
   const [scanHistory, setScanHistory] = useState([])
+  const [showMobilePopup, setShowMobilePopup] = useState(true)
+
+  // Auto-dismiss popup after 5 seconds
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowMobilePopup(false)
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [])
 
   // Handle navigation to details
   const handleShowDetails = (item, image = null) => {
@@ -49,6 +58,34 @@ function App() {
 
       {/* Top Banner (Optional for Hackathon feel) */}
       <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-blue-500 to-emerald-500 z-50 animate-pulse" />
+
+      {/* Mobile Usage Popup */}
+      <AnimatePresence>
+        {showMobilePopup && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-6 left-1/2 -translate-x-1/2 z-[60] px-4"
+          >
+            <div className="glass-card bg-slate-900/90 backdrop-blur-xl border border-emerald-500/30 p-4 rounded-2xl shadow-[0_8px_32px_rgba(16,185,129,0.3)] flex items-center gap-3 max-w-sm">
+              <div className="bg-emerald-500/20 p-2 rounded-xl">
+                <Smartphone className="text-emerald-400" size={24} />
+              </div>
+              <div className="flex-1">
+                <p className="text-white font-semibold text-sm">For better experience</p>
+                <p className="text-gray-300 text-xs">Use this app on mobile</p>
+              </div>
+              <button
+                onClick={() => setShowMobilePopup(false)}
+                className="text-gray-400 hover:text-white transition-colors p-1"
+              >
+                ×
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main Content Area */}
       <main className="relative h-screen pb-24 pt-20 overflow-y-auto">
