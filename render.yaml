@@ -1,0 +1,14 @@
+services:
+  # Backend API Service
+  - type: web
+    name: waste-segregate-backend
+    runtime: python
+    region: oregon
+    branch: dev
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+    plan: free
