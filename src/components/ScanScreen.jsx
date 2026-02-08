@@ -77,6 +77,7 @@ const ScanScreen = ({ onShowDetails }) => {
     const [isThinking, setIsThinking] = useState(false);
     const [showDetectionView, setShowDetectionView] = useState(false);
     const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
+    const [imageLoaded, setImageLoaded] = useState(false); // Track when image is ready
 
     // AI Voice Assistant logic
     const startListening = () => {
@@ -135,42 +136,53 @@ const ScanScreen = ({ onShowDetails }) => {
 
     // Calculate scaled bounding box coordinates
     const getScaledBoundingBox = (bbox, displayedWidth, displayedHeight) => {
-        // Get actual image dimensions from the ref instead of hardcoded values
-        let originalWidth = 1280;  // Default fallback
-        let originalHeight = 720;   // Default fallback
+        // Try to get image ref (check both refs)
+        const imageRef = detectionImageRef.current || resultsImageRef.current;
 
-        // Try to get natural dimensions from the image element
-        if (detectionImageRef.current) {
-            originalWidth = detectionImageRef.current.naturalWidth || 1280;
-            originalHeight = detectionImageRef.current.naturalHeight || 720;
+        if (!imageRef) {
+            console.warn('⚠️ No image ref available, using original bbox:', bbox);
+            return bbox;
         }
 
-        // If dimensions not provided, try to get from image ref
-        let actualDisplayedWidth = displayedWidth;
-        let actualDisplayedHeight = displayedHeight;
+        // Get natural (original) image dimensions
+        const originalWidth = imageRef.naturalWidth || 1280;
+        const originalHeight = imageRef.naturalHeight || 720;
 
-        if ((!actualDisplayedWidth || !actualDisplayedHeight) && detectionImageRef.current) {
-            actualDisplayedWidth = detectionImageRef.current.clientWidth;
-            actualDisplayedHeight = detectionImageRef.current.clientHeight;
-            console.log('📐 Using ref dimensions:', actualDisplayedWidth, 'x', actualDisplayedHeight);
+        // Get container dimensions
+        const containerWidth = imageRef.clientWidth;
+        const containerHeight = imageRef.clientHeight;
+
+        // Calculate actual rendered image size (excluding letterboxing from object-fit: contain)
+        const imageAspectRatio = originalWidth / originalHeight;
+        const containerAspectRatio = containerWidth / containerHeight;
+
+        let actualDisplayedWidth, actualDisplayedHeight, offsetX = 0, offsetY = 0;
+
+        if (containerAspectRatio > imageAspectRatio) {
+            // Container is wider - letterboxing on left/right
+            actualDisplayedHeight = containerHeight;
+            actualDisplayedWidth = containerHeight * imageAspectRatio;
+            offsetX = (containerWidth - actualDisplayedWidth) / 2;
+        } else {
+            // Container is taller - letterboxing on top/bottom
+            actualDisplayedWidth = containerWidth;
+            actualDisplayedHeight = containerWidth / imageAspectRatio;
+            offsetY = (containerHeight - actualDisplayedHeight) / 2;
         }
 
-        if (!actualDisplayedWidth || !actualDisplayedHeight) {
-            console.warn('⚠️ No displayed dimensions available, using original bbox:', bbox);
-            return bbox; // Fallback to original if dimensions not available
-        }
-
+        // Calculate scale factors
         const scaleX = actualDisplayedWidth / originalWidth;
         const scaleY = actualDisplayedHeight / originalHeight;
 
+        // Scale bounding box and add letterbox offset
         const scaled = {
-            x: bbox.x * scaleX,
-            y: bbox.y * scaleY,
+            x: (bbox.x * scaleX) + offsetX,
+            y: (bbox.y * scaleY) + offsetY,
             w: bbox.w * scaleX,
             h: bbox.h * scaleY
         };
 
-        console.log(`📏 Scaling bbox from ${originalWidth}x${originalHeight} to ${actualDisplayedWidth}x${actualDisplayedHeight}:`, bbox, '→', scaled, 'Scale:', scaleX.toFixed(3), 'x', scaleY.toFixed(3));
+        console.log(`📏 Scaling bbox from ${originalWidth}x${originalHeight} → ${Math.round(actualDisplayedWidth)}x${Math.round(actualDisplayedHeight)} (offset: ${Math.round(offsetX)}, ${Math.round(offsetY)}):`, bbox, '→', scaled);
         return scaled;
     };
 
@@ -180,6 +192,7 @@ const ScanScreen = ({ onShowDetails }) => {
         console.log('📐 Image loaded - Natural:', naturalWidth, 'x', naturalHeight, 'Displayed:', width, 'x', height);
         setImageDimensions({ width, height });
         console.log('📐 Image dimensions set to:', width, 'x', height);
+        setImageLoaded(true); // Trigger re-render with loaded image
     };
 
     const handleFileUpload = (e) => {
@@ -201,8 +214,9 @@ const ScanScreen = ({ onShowDetails }) => {
         facingMode: "environment"
     };
 
-    const capture = useCallback(() => {
+    const handleCapture = useCallback(() => {
         if (webcamRef.current) {
+            setImageLoaded(false); // Reset loaded state
             const imageSrc = webcamRef.current.getScreenshot({
                 width: 1280,
                 height: 720
@@ -332,11 +346,11 @@ const ScanScreen = ({ onShowDetails }) => {
                                             className="w-full rounded-lg object-contain max-h-[400px]"
                                             onLoad={handleImageLoad}
                                         />
-                                        {/* Bounding Boxes Overlay */}
-                                        {detectedItems.map((item, idx) => {
+                                        {/* Bounding Boxes Overlay - only render after image loads */}
+                                        {imageLoaded && detectedItems.map((item, idx) => {
                                             const normalizedCategory = normalizeCategoryName(item.bin);
                                             const config = BIN_CONFIG[normalizedCategory] || BIN_CONFIG.Organic;
-                                            const scaledBox = getScaledBoundingBox(item.bbox, imageDimensions.width, imageDimensions.height);
+                                            const scaledBox = getScaledBoundingBox(item.bbox, null, null); // Let function get dimensions from ref
                                             return (
                                                 <div
                                                     key={idx}
@@ -431,7 +445,7 @@ const ScanScreen = ({ onShowDetails }) => {
 
                             {/* Main Capture Button */}
                             <button
-                                onClick={capture}
+                                onClick={handleCapture}
                                 className="bg-white p-1 rounded-full shadow-[0_0_40px_rgba(255,255,255,0.2)] active:scale-95 transition-transform"
                             >
                                 <div className="w-16 h-16 sm:w-20 sm:h-20 border-[3px] border-black rounded-full flex items-center justify-center">
@@ -569,7 +583,7 @@ const ScanScreen = ({ onShowDetails }) => {
                                                 {/* Bounding Boxes Overlay */}
                                                 {detectedItems.map((item, idx) => {
                                                     const config = BIN_CONFIG[item.bin] || BIN_CONFIG.Landfill;
-                                                    const scaledBox = getScaledBoundingBox(item.bbox, imageDimensions.width, imageDimensions.height);
+                                                    const scaledBox = getScaledBoundingBox(item.bbox, null, null);
                                                     return (
                                                         <div
                                                             key={idx}
