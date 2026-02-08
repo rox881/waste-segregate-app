@@ -3,7 +3,9 @@ import Webcam from 'react-webcam';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, RefreshCcw, ArrowRight, ShieldCheck, Info, Leaf, Trash2, Recycle, AlertTriangle, Upload, Mic, MessageSquare, X, Volume2 } from 'lucide-react';
 
-const API_URL = 'http://localhost:8000/detect';
+// Use environment variable for API URL (Vite uses import.meta.env)
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/detect';
+const CHAT_URL = import.meta.env.VITE_CHAT_URL || 'http://localhost:8000/chat';
 
 const BIN_CONFIG = {
     Recycle: {
@@ -106,7 +108,7 @@ const ScanScreen = ({ onShowDetails }) => {
         setIsThinking(true);
         try {
             console.log("🗣️ Sending query to AI:", query);
-            const response = await fetch('http://localhost:8000/chat', {
+            const response = await fetch(CHAT_URL, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
