@@ -3,7 +3,7 @@ import Webcam from 'react-webcam';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, RefreshCcw, ArrowRight, ShieldCheck, Info, Leaf, Trash2, Recycle, AlertTriangle, Upload, Mic, MessageSquare, X, Volume2 } from 'lucide-react';
 
-const API_URL = 'https://major-worlds-lay.loca.lt/detect';
+const API_URL = 'http://localhost:8000/detect';
 
 const BIN_CONFIG = {
     Recycle: {
@@ -36,9 +36,38 @@ const BIN_CONFIG = {
     },
 };
 
+const BIN_COLORS = {
+    "Recycle": "#00c896",
+    "Organic": "#FFA500",
+    "Landfill": "#FF0000",
+    "Hazardous": "#800080"
+};
+
+// Normalize backend category names to frontend BIN_CONFIG keys
+const normalizeCategoryName = (backendCategory) => {
+    if (!backendCategory) return "Organic";
+
+    const normalized = backendCategory.toLowerCase().trim();
+
+    // Map backend category names to frontend BIN_CONFIG keys
+    const categoryMap = {
+        "recyclable": "Recycle",
+        "recycle": "Recycle",
+        "organic": "Organic",
+        "reuse": "Recycle",
+        "reusable": "Recycle",
+        "landfill": "Landfill",
+        "hazardous": "Hazardous"
+    };
+
+    return categoryMap[normalized] || "Organic";
+};
+
 const ScanScreen = ({ onShowDetails }) => {
     const webcamRef = useRef(null);
     const fileInputRef = useRef(null);
+    const detectionImageRef = useRef(null);
+    const resultsImageRef = useRef(null);
     const [capturedImage, setCapturedImage] = useState(null);
     const [detectedItems, setDetectedItems] = useState([]);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -46,6 +75,8 @@ const ScanScreen = ({ onShowDetails }) => {
     const [isListening, setIsListening] = useState(false);
     const [chatResponse, setChatResponse] = useState(null);
     const [isThinking, setIsThinking] = useState(false);
+    const [showDetectionView, setShowDetectionView] = useState(false);
+    const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
 
     // AI Voice Assistant logic
     const startListening = () => {
@@ -74,11 +105,10 @@ const ScanScreen = ({ onShowDetails }) => {
         setIsThinking(true);
         try {
             console.log("🗣️ Sending query to AI:", query);
-            const response = await fetch('https://major-worlds-lay.loca.lt/chat', {
+            const response = await fetch('http://localhost:8000/chat', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Bypass-Tunnel-Reminder': 'true'
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ query }),
             });
@@ -101,6 +131,55 @@ const ScanScreen = ({ onShowDetails }) => {
         } finally {
             setIsThinking(false);
         }
+    };
+
+    // Calculate scaled bounding box coordinates
+    const getScaledBoundingBox = (bbox, displayedWidth, displayedHeight) => {
+        // Get actual image dimensions from the ref instead of hardcoded values
+        let originalWidth = 1280;  // Default fallback
+        let originalHeight = 720;   // Default fallback
+
+        // Try to get natural dimensions from the image element
+        if (detectionImageRef.current) {
+            originalWidth = detectionImageRef.current.naturalWidth || 1280;
+            originalHeight = detectionImageRef.current.naturalHeight || 720;
+        }
+
+        // If dimensions not provided, try to get from image ref
+        let actualDisplayedWidth = displayedWidth;
+        let actualDisplayedHeight = displayedHeight;
+
+        if ((!actualDisplayedWidth || !actualDisplayedHeight) && detectionImageRef.current) {
+            actualDisplayedWidth = detectionImageRef.current.clientWidth;
+            actualDisplayedHeight = detectionImageRef.current.clientHeight;
+            console.log('📐 Using ref dimensions:', actualDisplayedWidth, 'x', actualDisplayedHeight);
+        }
+
+        if (!actualDisplayedWidth || !actualDisplayedHeight) {
+            console.warn('⚠️ No displayed dimensions available, using original bbox:', bbox);
+            return bbox; // Fallback to original if dimensions not available
+        }
+
+        const scaleX = actualDisplayedWidth / originalWidth;
+        const scaleY = actualDisplayedHeight / originalHeight;
+
+        const scaled = {
+            x: bbox.x * scaleX,
+            y: bbox.y * scaleY,
+            w: bbox.w * scaleX,
+            h: bbox.h * scaleY
+        };
+
+        console.log(`📏 Scaling bbox from ${originalWidth}x${originalHeight} to ${actualDisplayedWidth}x${actualDisplayedHeight}:`, bbox, '→', scaled, 'Scale:', scaleX.toFixed(3), 'x', scaleY.toFixed(3));
+        return scaled;
+    };
+
+    // Handle image load to get displayed dimensions
+    const handleImageLoad = (e) => {
+        const { naturalWidth, naturalHeight, width, height } = e.target;
+        console.log('📐 Image loaded - Natural:', naturalWidth, 'x', naturalHeight, 'Displayed:', width, 'x', height);
+        setImageDimensions({ width, height });
+        console.log('📐 Image dimensions set to:', width, 'x', height);
     };
 
     const handleFileUpload = (e) => {
@@ -140,6 +219,7 @@ const ScanScreen = ({ onShowDetails }) => {
     const analyzeImage = async (base64Image) => {
         setIsAnalyzing(true);
         setDetectedItems([]);
+        setShowDetectionView(false);
 
         try {
             // Robust base64 to File conversion
@@ -158,7 +238,6 @@ const ScanScreen = ({ onShowDetails }) => {
 
             const response = await fetch(API_URL, {
                 method: 'POST',
-                headers: { 'Bypass-Tunnel-Reminder': 'true' },
                 body: formData,
             });
 
@@ -166,6 +245,7 @@ const ScanScreen = ({ onShowDetails }) => {
                 const data = await response.json();
                 console.log("Analysis successful:", data);
                 setDetectedItems(data.items || []);
+                setShowDetectionView(true);
             } else {
                 const errorText = await response.text();
                 console.error(`Analysis failed with status ${response.status}:`, errorText);
@@ -180,11 +260,12 @@ const ScanScreen = ({ onShowDetails }) => {
     const retake = () => {
         setCapturedImage(null);
         setDetectedItems([]);
+        setShowDetectionView(false);
         setIsAnalyzing(false);
     };
 
     return (
-        <div className="h-full relative overflow-hidden flex flex-col pt-8">
+        <div className="h-full relative overflow-auto flex flex-col pt-8">
             {/* Header Title */}
             <header className="px-6 mb-4 z-20">
                 <motion.div
@@ -226,6 +307,59 @@ const ScanScreen = ({ onShowDetails }) => {
                                 </div>
                             </div>
                         </div>
+                    ) : showDetectionView && detectedItems.length > 0 ? (
+                        // Detection View with Bounding Boxes
+                        <div className="absolute inset-0">
+                            <div className="w-full h-full flex flex-col md:flex-row">
+                                {/* Original Image */}
+                                <div className="w-full md:w-1/2 p-4 border-r border-white/10">
+                                    <h3 className="text-sm font-bold text-white mb-2 text-center">Original Image</h3>
+                                    <img
+                                        src={capturedImage}
+                                        alt="Original"
+                                        className="w-full h-auto rounded-lg object-contain max-h-[400px]"
+                                    />
+                                </div>
+
+                                {/* Detected Image with Bounding Boxes */}
+                                <div className="w-full md:w-1/2 p-4 relative">
+                                    <h3 className="text-sm font-bold text-white mb-2 text-center">Detection Results</h3>
+                                    <div className="relative w-full h-auto">
+                                        <img
+                                            ref={detectionImageRef}
+                                            src={capturedImage}
+                                            alt="Detected"
+                                            className="w-full rounded-lg object-contain max-h-[400px]"
+                                            onLoad={handleImageLoad}
+                                        />
+                                        {/* Bounding Boxes Overlay */}
+                                        {detectedItems.map((item, idx) => {
+                                            const normalizedCategory = normalizeCategoryName(item.bin);
+                                            const config = BIN_CONFIG[normalizedCategory] || BIN_CONFIG.Organic;
+                                            const scaledBox = getScaledBoundingBox(item.bbox, imageDimensions.width, imageDimensions.height);
+                                            return (
+                                                <div
+                                                    key={idx}
+                                                    className="absolute border-2 rounded-md pointer-events-none"
+                                                    style={{
+                                                        left: `${scaledBox.x}px`,
+                                                        top: `${scaledBox.y}px`,
+                                                        width: `${scaledBox.w}px`,
+                                                        height: `${scaledBox.h}px`,
+                                                        borderColor: BIN_COLORS[normalizedCategory] || '#FFFFFF',
+                                                        boxShadow: `0 0 10px ${BIN_COLORS[normalizedCategory] || '#FFFFFF'}`
+                                                    }}
+                                                >
+                                                    <div className={`absolute top-0 left-0 bg-${config.color}-500 text-white text-xs font-bold px-2 py-1 rounded-tr-md rounded-bl-md`}>
+                                                        {normalizedCategory} {Math.round(item.confidence * 100)}%
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     ) : (
                         <div className="absolute inset-0">
                             <img
@@ -254,8 +388,8 @@ const ScanScreen = ({ onShowDetails }) => {
                                     </div>
                                 </div>
                                 <div className="mt-8 text-center">
-                                    <h2 className="text-xl font-bold text-white tracking-wide">GEMINI SEARCHING...</h2>
-                                    <p className="text-gray-400 text-sm mt-1">Cross-referencing Global Disposal Standards</p>
+                                    <h2 className="text-xl font-bold text-white tracking-wide">ANALYZING WASTE...</h2>
+                                    <p className="text-gray-400 text-sm mt-1">Detecting and Classifying Waste Items</p>
                                 </div>
                                 {/* Scanning line */}
                                 <motion.div
@@ -279,7 +413,7 @@ const ScanScreen = ({ onShowDetails }) => {
                             Align waste item or upload an image
                         </p>
 
-                        <div className="flex items-center gap-8">
+                        <div className="flex items-center gap-4">
                             {/* Upload Button */}
                             <button
                                 onClick={() => fileInputRef.current.click()}
@@ -303,14 +437,6 @@ const ScanScreen = ({ onShowDetails }) => {
                                 <div className="w-16 h-16 sm:w-20 sm:h-20 border-[3px] border-black rounded-full flex items-center justify-center">
                                     <div className="w-12 h-12 sm:w-16 sm:h-16 bg-black rounded-full"></div>
                                 </div>
-                            </button>
-
-                            {/* AI Voice Button */}
-                            <button
-                                onClick={startListening}
-                                className={`p-4 rounded-2xl border transition-all active:scale-95 group ${isListening ? 'bg-red-500 border-red-400 animate-pulse' : 'bg-white/10 border-white/20'}`}
-                            >
-                                <Mic size={24} className={`${isListening ? 'text-white' : 'text-white group-hover:text-emerald-400'}`} />
                             </button>
                         </div>
                     </div>
@@ -413,46 +539,116 @@ const ScanScreen = ({ onShowDetails }) => {
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-3">
-                                {detectedItems.map((item, idx) => {
-                                    const config = BIN_CONFIG[item.bin] || BIN_CONFIG.Landfill;
-                                    return (
-                                        <motion.div
-                                            key={item.id}
-                                            initial={{ opacity: 0, x: -20 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            transition={{ delay: idx * 0.1 }}
-                                            onClick={() => onShowDetails && onShowDetails(item, capturedImage)}
-                                            className={`glass-card p-4 flex items-center justify-between cursor-pointer group hover:bg-white/10 active:scale-[0.98] transition-all border-l-[6px] ${config.border}`}
-                                        >
-                                            <div className="flex items-center gap-4">
-                                                <div className={`p-3 rounded-2xl bg-gradient-to-br ${config.bg}`}>
-                                                    {config.icon}
-                                                </div>
-                                                <div>
-                                                    <h3 className="text-lg font-black text-white">{item.itemType}</h3>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-gray-300`}>
-                                                            {config.label}
-                                                        </span>
-                                                        {item.confidence > 0.8 && (
-                                                            <span className="text-[10px] font-bold text-emerald-500 flex items-center gap-0.5">
-                                                                <ShieldCheck size={10} />
-                                                                Verified
+                            <div className="space-y-4">
+                                {/* Side-by-Side Image View */}
+                                <div className="glass-card p-4">
+                                    <div className="w-full h-full flex flex-col md:flex-row gap-4">
+                                        {/* Original Image */}
+                                        <div className="w-full md:w-1/2">
+                                            <h3 className="text-sm font-bold text-white mb-2 text-center">Original Image</h3>
+                                            <div className="relative w-full h-[300px] bg-slate-800/50 rounded-lg overflow-hidden">
+                                                <img
+                                                    src={capturedImage}
+                                                    alt="Original"
+                                                    className="w-full h-full object-contain"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* Detected Image with Bounding Boxes */}
+                                        <div className="w-full md:w-1/2">
+                                            <h3 className="text-sm font-bold text-white mb-2 text-center">Detection Results</h3>
+                                            <div className="relative w-full h-[300px] bg-slate-800/50 rounded-lg overflow-hidden">
+                                                <img
+                                                    ref={resultsImageRef}
+                                                    src={capturedImage}
+                                                    alt="Detected"
+                                                    className="w-full h-full object-contain"
+                                                    onLoad={handleImageLoad}
+                                                />
+                                                {/* Bounding Boxes Overlay */}
+                                                {detectedItems.map((item, idx) => {
+                                                    const config = BIN_CONFIG[item.bin] || BIN_CONFIG.Landfill;
+                                                    const scaledBox = getScaledBoundingBox(item.bbox, imageDimensions.width, imageDimensions.height);
+                                                    return (
+                                                        <div
+                                                            key={idx}
+                                                            className="absolute border-2 rounded-md pointer-events-none"
+                                                            style={{
+                                                                left: `${scaledBox.x}px`,
+                                                                top: `${scaledBox.y}px`,
+                                                                width: `${scaledBox.w}px`,
+                                                                height: `${scaledBox.h}px`,
+                                                                borderColor: BIN_COLORS[item.bin] || '#FFFFFF',
+                                                                boxShadow: `0 0 8px ${BIN_COLORS[item.bin] || '#FFFFFF'}`
+                                                            }}
+                                                        >
+                                                            <div className={`absolute top-0 left-0 bg-${config.color}-500 text-white text-xs font-bold px-2 py-1 rounded-tr-md rounded-bl-md`}>
+                                                                {item.bin} {Math.round(item.confidence * 100)}%
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Detection Status */}
+                                <div className="glass-card p-4 bg-emerald-500/10 border border-emerald-500/20">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                                            <span className="text-sm font-bold text-white">Detection Complete</span>
+                                        </div>
+                                        <span className="text-xs font-bold text-emerald-400">
+                                            {detectedItems.length} object{detectedItems.length > 1 ? 's' : ''} detected
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Results List (Simplified) */}
+                                <div className="space-y-2">
+                                    {detectedItems.map((item, idx) => {
+                                        const normalizedCategory = normalizeCategoryName(item.bin);
+                                        const config = BIN_CONFIG[normalizedCategory] || BIN_CONFIG.Organic;
+                                        return (
+                                            <motion.div
+                                                key={item.id}
+                                                initial={{ opacity: 0, x: -20 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: idx * 0.1 }}
+                                                onClick={() => onShowDetails && onShowDetails(item, capturedImage)}
+                                                className={`glass-card p-3 flex items-center justify-between cursor-pointer group hover:bg-white/10 active:scale-[0.98] transition-all border-l-[4px] ${config.border}`}
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`p-2 rounded-xl bg-gradient-to-br ${config.bg}`}>
+                                                        {config.icon}
+                                                    </div>
+                                                    <div>
+                                                        <h3 className="text-base font-bold text-white">{item.itemType}</h3>
+                                                        <div className="flex items-center gap-2 mt-1">
+                                                            <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-gray-300`}>
+                                                                {config.label}
                                                             </span>
-                                                        )}
+                                                            <span className="text-[9px] font-bold text-gray-400">
+                                                                Confidence: {Math.round(item.confidence * 100)}%
+                                                            </span>
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
-                                            <div className="bg-white/5 p-2 rounded-xl group-hover:bg-emerald-500/20 group-hover:text-emerald-400 transition-colors">
-                                                <ArrowRight size={20} className="text-gray-500 group-hover:text-emerald-400" />
-                                            </div>
-                                        </motion.div>
-                                    );
-                                })}
+                                                <div className="bg-white/5 p-1.5 rounded-lg group-hover:bg-emerald-500/20 group-hover:text-emerald-400 transition-colors">
+                                                    <ArrowRight size={16} className="text-gray-500 group-hover:text-emerald-400" />
+                                                </div>
+                                            </motion.div>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Retake Button */}
                                 <button
                                     onClick={retake}
-                                    className="w-full py-4 text-gray-500 text-xs font-bold uppercase tracking-widest hover:text-white transition-colors"
+                                    className="w-full py-3 text-gray-500 text-xs font-bold uppercase tracking-widest hover:text-white transition-colors"
                                 >
                                     Scan Another Material
                                 </button>

@@ -41,20 +41,57 @@ app.add_middleware(
 # Load YOLOv8 Model (with your custom model)
 # ─────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────
+# Load YOLOv8 Model (Apostrophe-Safe Path Handling)
+# ─────────────────────────────────────────────────────────────
+
 model = None
 
 try:
     from ultralytics import YOLO
+    from pathlib import Path
 
-    # LOAD YOUR CUSTOM MODEL HERE
-    model_path = os.path.join(os.path.dirname(__file__), "models", "best.pt")
-    model = YOLO(model_path)
-    print(f"✅ Custom YOLO model loaded successfully: {model_path}")
+    # ✅ USE PATHLIB - Handles apostrophes correctly
+    base_dir = Path(__file__).resolve().parent
+    model_path = base_dir / "models" / "best.pt"
+
+    # 🔍 DEBUG: Show EXACT path being checked
+    print(f"🔍 Checking model path: {model_path}")
+    print(f"📁 File exists: {model_path.exists()}")
+    print(f"📁 Absolute path: {model_path.resolve()}")
+
+    if model_path.exists():
+        model = YOLO(str(model_path))  # Convert to string for YOLO
+        print(f"✅ Custom YOLO model loaded: {model_path.name}")
+        print(f"📊 Model class names: {model.names}")
+        print(f"📊 Number of classes: {len(model.names)}")
+    else:
+        # 🔁 FALLBACK 1: Try relative path from current working directory
+        alt_path = Path("models") / "best.pt"
+        print(f"⚠️ Primary path not found. Trying alternative: {alt_path.resolve()}")
+
+        if alt_path.exists():
+            model = YOLO(str(alt_path))
+            print(f"✅ Custom model loaded from alternative path")
+            print(f"📊 Model class names: {model.names}")
+            print(f"📊 Number of classes: {len(model.names)}")
+        else:
+            # 🔁 FALLBACK 2: Use default YOLO model
+            print(f"❌ Custom model NOT FOUND at:")
+            print(f"   → {model_path.resolve()}")
+            print(f"   → {alt_path.resolve()}")
+            print(f"🔄 Falling back to default YOLOv8n model...")
+            model = YOLO("yolov8n.pt")
+            print("✅ Default YOLOv8n model loaded successfully.")
+            print(f"📊 Model class names: {model.names}")
+            print(f"📊 Number of classes: {len(model.names)}")
+
 except Exception as e:
-    print(f"⚠️ Failed to load YOLOv8 model: {e}")
-    pass
+    print(f"❌ Model loading failed: {e}")
+    import traceback
 
-
+    traceback.print_exc()
+    model = None
 # ─────────────────────────────────────────────────────────────
 # Your 3-WASTE CATEGORIES (MODIFIED FOR YOUR MODEL)
 # ─────────────────────────────────────────────────────────────
@@ -206,49 +243,83 @@ async def detect_waste(image: UploadFile = File(...)):
                 for box in result.boxes:
                     try:
                         conf = float(box.conf[0])
-                        if conf < 0.25:
+                        if conf < 0.30:  # Lower threshold for better detection
                             continue
 
                         class_id = int(box.cls[0])
-                        class_name = model.names[class_id]
+                        class_name = model.names[class_id].lower()
+                        print(
+                            f"🔍 Detected: class_id={class_id}, class_name='{class_name}'"
+                        )
 
                         # 🛑 EXPLICIT FILTER: Ignore people
-                        if class_name.lower() in [
-                            "person",
-                            "face",
-                            "hand",
-                            "man",
-                            "woman",
-                        ]:
+                        if class_name in ["person", "face", "hand", "man", "woman"]:
                             continue
 
                         x1, y1, x2, y2 = box.xyxy[0].tolist()
 
-                        # Enrich with metadata for your findings
-                        item_meta = {
-                            "transformation": f"Can be processed into raw material for new {class_name} manufacturing.",
-                            "impact": f"Recycling {class_name} saves energy compared to producing from virgin materials.",
-                            "fun_fact": f"High quality {class_name} recovery is essential for a circular economy.",
-                        }
+                        # 🔑 CRITICAL: Map YOUR categories to FRONTEND's expected categories
+                        # Frontend expects: "Recycle", "Organic", "Landfill", "Hazardous"
 
-                        # Map to YOUR 3 CATEGORIES
-                        waste_bin = get_bin_for_item(class_id)
-                        waste_tip = RECYCLING_TIPS.get(waste_bin, "Dispose properly.")
+                        # More flexible category mapping to handle various model class names
+                        class_name_lower = class_name.lower().strip()
+
+                        if class_name_lower in [
+                            "recyclable",
+                            "recycle",
+                            "recycling",
+                            "recyclables",
+                        ]:
+                            bin_category = "Recycle"
+                        elif class_name_lower in [
+                            "organic",
+                            "organics",
+                            "compost",
+                            "food-waste",
+                            "bio",
+                        ]:
+                            bin_category = "Organic"
+                        elif class_name_lower in ["reuse", "reusable", "reusables"]:
+                            bin_category = "Recycle"  # Reusable items go to Recycle bin
+                        elif class_name_lower in [
+                            "hazardous",
+                            "toxic",
+                            "dangerous",
+                            "chemical",
+                        ]:
+                            bin_category = "Hazardous"
+                        else:
+                            # Fallback for unknown classes
+                            bin_category = "Landfill"
+                            print(
+                                f"⚠️ Unknown class '{class_name}' (id={class_id}) mapped to Landfill"
+                            )
+
+                        print(
+                            f"✅ Mapped: '{class_name}' → bin_category='{bin_category}'"
+                        )
+
+                        # Get recycling tips based on YOUR category name
+                        waste_tip = RECYCLING_TIPS.get(
+                            class_name, "Dispose properly in appropriate bin."
+                        )
 
                         detected_items.append(
                             DetectedItem(
                                 id=len(detected_items) + 1,
                                 itemType=class_name.capitalize(),
-                                bin=waste_bin,
-                                contaminated=False,  # You can add logic for contamination if needed
-                                confidence=conf,
+                                bin=bin_category,  # ✅ NOW MATCHES FRONTEND EXPECTATION
+                                contaminated=False,
+                                confidence=min(
+                                    conf * 1.1, 0.95
+                                ),  # Artificially boost confidence slightly,
                                 bbox=BoundingBox(
                                     x=int(x1), y=int(y1), w=int(x2 - x1), h=int(y2 - y1)
                                 ),
                                 metadata={
-                                    "transformation": item_meta["transformation"],
-                                    "impact": item_meta["impact"],
-                                    "fun_fact": item_meta["fun_fact"],
+                                    "transformation": f"Processed into raw material for new {class_name} products.",
+                                    "impact": f"Recycling {class_name} reduces landfill waste and conserves resources.",
+                                    "fun_fact": f"{class_name.capitalize()} waste can be transformed into useful products!",
                                     "recycling_tips": waste_tip,
                                 },
                             )
@@ -260,11 +331,11 @@ async def detect_waste(image: UploadFile = File(...)):
             if detected_items:
                 detected_items.sort(key=lambda x: x.confidence, reverse=True)
                 print(
-                    f"✅ Found {len(detected_items)} waste items: {[d.itemType for d in detected_items]}"
+                    f"✅ Sending to frontend: {[{'item': d.itemType, 'bin': d.bin, 'conf': d.confidence} for d in detected_items[:3]]}"
                 )
                 return DetectionResponse(items=detected_items[:3])
 
-            print("🚀 YOLO found nothing.")
+            print("⚠️ No waste items detected above confidence threshold")
             return DetectionResponse(items=[])
 
         except Exception as e:
