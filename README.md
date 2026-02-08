@@ -130,24 +130,27 @@ The application uses a **custom-trained YOLOv8 model** specifically for waste de
 
 ```
 waste-segregate-app/
-├── backend/
-│   ├── main.py                 # FastAPI server
+├── frontend/                  # Frontend application
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── ScanScreen.jsx     # Main detection interface
+│   │   │   ├── ItemDetailScreen.jsx
+│   │   │   ├── InsightsScreen.jsx
+│   │   │   ├── ImpactScreen.jsx
+│   │   │   └── ImpactDashboard.jsx
+│   │   ├── data/
+│   │   │   └── wasteData.js       # Waste knowledge base
+│   │   ├── App.jsx                # Main app component
+│   │   └── main.jsx               # Entry point
+│   ├── public/                # Static assets
+│   ├── package.json           # Node dependencies
+│   ├── vite.config.js         # Vite configuration
+│   └── index.html             # HTML entry point
+├── backend/                   # Backend API
+│   ├── main.py                # FastAPI server
 │   ├── models/
 │   │   └── best.pt            # YOLOv8 model weights
 │   └── requirements.txt       # Python dependencies
-├── src/
-│   ├── components/
-│   │   ├── ScanScreen.jsx     # Main detection interface
-│   │   ├── ItemDetailScreen.jsx
-│   │   ├── InsightsScreen.jsx
-│   │   ├── ImpactScreen.jsx
-│   │   └── ImpactDashboard.jsx
-│   ├── data/
-│   │   └── wasteData.js       # Waste knowledge base
-│   ├── App.jsx                # Main app component
-│   └── main.jsx               # Entry point
-├── public/                    # Static assets
-├── package.json               # Node dependencies
 └── README.md                  # This file
 ```
 
@@ -225,10 +228,10 @@ INFO: Uvicorn running on http://0.0.0.0:8000
 
 ### Step 3: Frontend Setup
 
-#### 3.1 Open New Terminal & Navigate to Root
+#### 3.1 Open New Terminal & Navigate to Frontend
 
 ```bash
-cd waste-segregate-app
+cd waste-segregate-app/frontend
 ```
 
 #### 3.2 Install Dependencies
