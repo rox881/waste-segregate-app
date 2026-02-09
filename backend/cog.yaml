@@ -1,0 +1,30 @@
+# Replicate Cog configuration for YOLO Waste Segregation Model
+# Documentation: https://github.com/replicate/cog/blob/main/docs/yaml.md
+
+build:
+  # Use GPU for faster YOLO inference
+  gpu: true
+  
+  # Python version
+  python_version: "3.11"
+  
+  # System packages needed for OpenCV and image processing
+  system_packages:
+    - "libgl1-mesa-glx"
+    - "libglib2.0-0"
+    - "libsm6"
+    - "libxext6"
+    - "libxrender1"
+  
+  # Python packages
+  python_packages:
+    - "torch==2.1.0"
+    - "torchvision==0.16.0"
+    - "ultralytics==8.0.20"
+    - "opencv-python-headless==4.8.0.76"
+    - "Pillow==10.0.0"
+    - "pandas==2.0.3"
+    - "numpy==1.24.3"
+
+# Predictor class location
+predict: "predictor.py:Predictor"
