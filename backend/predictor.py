@@ -1,101 +1,64 @@
-"""
-YOLO Waste Segregation Model Predictor for Replicate
-Model: best.pt (6.2MB YOLOv8 custom model)
-Purpose: Detect and classify waste types from uploaded images
-"""
-
-from cog import BasePredictor, Input, Path
-from PIL import Image
 import torch
+from ultralytics import YOLO
+from PIL import Image
 import io
 import base64
+import numpy as np
 
 
-class Predictor(BasePredictor):
+class Predictor:
     def setup(self):
-        """Load YOLO model on initialization"""
-        print("🔄 Loading YOLO model...")
-
-        # Load custom YOLO model
-        self.model = torch.hub.load(
-            "ultralytics/yolov5",
-            "custom",
-            path="models/best.pt",
-            force_reload=False,
-            trust_repo=True,
-        )
-
-        # Set model to evaluation mode
-        self.model.eval()
-
+        """Load the trained waste segregation model"""
+        print("🔄 Loading trained YOLO model from best.pt...")
+        # CRITICAL FIX: Load YOUR trained model (not download from internet)
+        self.model = YOLO("/src/models/best.pt")
         print("✅ Model loaded successfully!")
-        print(f"📊 Model classes: {self.model.names}")
 
-    def predict(
-        self,
-        image: Path = Input(description="Input image for waste detection"),
-        confidence: float = Input(
-            description="Minimum confidence threshold", default=0.25, ge=0.0, le=1.0
-        ),
-    ) -> dict:
+    def predict(self, image):
         """
-        Predict waste type from image
+        Run waste detection on input image
 
         Args:
-            image: Path to input image
-            confidence: Minimum confidence threshold for detections
+            image: PIL.Image or base64-encoded image
 
         Returns:
-            Dictionary with detections and metadata
+            dict with detections
         """
-        try:
-            print(f"🖼️  Processing image: {image}")
+        # Handle base64 input if needed
+        if isinstance(image, str) and image.startswith("data:image"):
+            # Strip data URL prefix
+            if ";base64," in image:
+                image = image.split(";base64,")[1]
+            image_bytes = base64.b64decode(image)
+            image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        elif isinstance(image, str):
+            # Assume URL or path
+            image = Image.open(image).convert("RGB")
 
-            # Load image
-            img = Image.open(image)
+        # Run inference
+        results = self.model(image, conf=0.25)
 
-            # Convert to RGB if needed (handles PNG with alpha channel)
-            if img.mode != "RGB":
-                img = img.convert("RGB")
+        # Parse results
+        detections = []
+        for result in results:
+            boxes = result.boxes
+            for box in boxes:
+                xyxy = box.xyxy[0].cpu().numpy()
+                conf = float(box.conf[0].cpu().numpy())
+                cls = int(box.cls[0].cpu().numpy())
+                name = result.names[cls]
 
-            print(f"✅ Image loaded: {img.size}")
+                detections.append(
+                    {
+                        "label": name,
+                        "confidence": round(conf, 2),
+                        "bbox": [
+                            int(xyxy[0]),
+                            int(xyxy[1]),
+                            int(xyxy[2]),
+                            int(xyxy[3]),
+                        ],
+                    }
+                )
 
-            # Set confidence threshold
-            self.model.conf = confidence
-
-            # Run inference
-            print("🔍 Running inference...")
-            results = self.model(img)
-
-            # Convert results to pandas DataFrame
-            detections_df = results.pandas().xyxy[0]
-
-            print(f"🎯 Found {len(detections_df)} detections")
-
-            # Format results
-            detections = []
-            for _, row in detections_df.iterrows():
-                detection = {
-                    "class": row["name"],
-                    "confidence": float(row["confidence"]),
-                    "bbox": {
-                        "xmin": float(row["xmin"]),
-                        "ymin": float(row["ymin"]),
-                        "xmax": float(row["xmax"]),
-                        "ymax": float(row["ymax"]),
-                    },
-                }
-                detections.append(detection)
-                print(f"  - {row['name']}: {row['confidence']:.2%}")
-
-            # Return results with metadata
-            return {
-                "detections": detections,
-                "total_detections": len(detections),
-                "image_size": {"width": img.size[0], "height": img.size[1]},
-                "model_classes": self.model.names,
-            }
-
-        except Exception as e:
-            print(f"❌ Error during prediction: {str(e)}")
-            raise
+        return {"detections": detections, "count": len(detections)}

@@ -1,6 +1,7 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
 torch==2.1.0
 torchvision==0.16.0
-ultralytics==8.0.200
+ultralytics==8.0.20
 opencv-python-headless==4.8.0.76
 Pillow==10.0.0
 pandas==2.0.3
